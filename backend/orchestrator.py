@@ -1,0 +1,83 @@
+import os
+import json
+from typing import List, Dict, Any
+from providers.anthropic_provider import AnthropicProvider
+from providers.openai_provider import OpenAIProvider
+from providers.gemini_provider import GeminiProvider
+
+MODERATOR_PROVIDER = os.getenv("MODERATOR_PROVIDER", "anthropic")
+MODERATOR_MODEL = os.getenv("MODERATOR_MODEL", "claude-3-5-haiku-20241022")
+MODERATOR_API_KEY = os.getenv("MODERATOR_API_KEY")
+
+MODERATOR_PROMPT = """Kamu adalah Moderator diskusi AI. Tugasmu adalah mengatur giliran bicara agent dalam diskusi grup.
+
+Daftar agent aktif:
+{agent_list_json}
+
+Pesan terbaru dari user:
+"{user_message}"
+
+Riwayat diskusi singkat (3 pesan terakhir):
+{recent_history}
+
+Tentukan urutan agent yang harus merespons pesan ini. Pilih berdasarkan relevansi keahlian mereka terhadap topik. Tidak semua agent harus bicara — pilih yang paling relevan (minimal 1, maksimal semua). 
+
+Berikan output HANYA dalam format JSON berikut, tanpa penjelasan tambahan atau markdown block:
+{{
+  "speaking_order": ["agent_id"],
+  "context_hints": {{"agent_id": "hint singkat"}},
+  "reasoning": "alasan singkat pemilihan urutan"
+}}"""
+
+async def determine_speaking_order(
+    active_agents: List[Dict],
+    user_message: str,
+    recent_history: List[Dict]
+) -> Dict[str, Any]:
+    agents_summary = [{"id": str(a["id"]), "name": a["name"], "role": a["role"]} for a in active_agents]
+    history_str = json.dumps(recent_history, ensure_ascii=False, indent=2)
+    agents_str = json.dumps(agents_summary, ensure_ascii=False, indent=2)
+    
+    system_prompt = MODERATOR_PROMPT.format(
+        agent_list_json=agents_str,
+        user_message=user_message,
+        recent_history=history_str
+    )
+    
+    if not MODERATOR_API_KEY:
+        return {
+             "speaking_order": [str(a["id"]) for a in active_agents],
+             "context_hints": {},
+             "reasoning": "Fallback order because Moderator API key is missing."
+        }
+
+    provider_inst = None
+    if MODERATOR_PROVIDER == "anthropic":
+        provider_inst = AnthropicProvider()
+    elif MODERATOR_PROVIDER == "openai":
+        provider_inst = OpenAIProvider()
+    elif MODERATOR_PROVIDER == "gemini":
+        provider_inst = GeminiProvider()
+    else:
+         return {"speaking_order": [str(a["id"]) for a in active_agents], "context_hints": {}}
+
+    try:
+        response_text = await provider_inst.generate(
+            api_key=MODERATOR_API_KEY,
+            model=MODERATOR_MODEL,
+            system_prompt=system_prompt,
+            messages=[{"role": "user", "content": "Tentukan urutannya sekarang dalam JSON murni."}],
+            temperature=0.2,
+            max_tokens=600
+        )
+        
+        response_text = response_text.replace("```json", "").replace("```", "").strip()
+        data = json.loads(response_text)
+        return dict(data)
+    except Exception as e:
+        print(f"Error calling moderator: {e}")
+        return {
+             "speaking_order": [str(a["id"]) for a in active_agents],
+             "context_hints": {},
+             "reasoning": f"Error running moderator: {str(e)}"
+        }
