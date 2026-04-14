@@ -90,6 +90,24 @@ export default function AgentManager() {
                       <input required={!editId} type="password" placeholder="••••••••••••••••" className="w-full bg-black/20 border border-white/10 rounded-lg p-3" value={formData.api_key} onChange={e=>setFormData({...formData, api_key: e.target.value})} />
                   </div>
                   
+                  <div>
+                      <label className="block text-sm flex justify-between text-slate-400 mb-1">
+                          <span>Temperature (Kreativitas)</span>
+                          <span className="text-emerald-400 font-mono">{formData.temperature}</span>
+                      </label>
+                      <input type="range" min="0" max="2" step="0.1" className="w-full mt-2 accent-indigo-500 cursor-pointer" value={formData.temperature} onChange={e=>setFormData({...formData, temperature: parseFloat(e.target.value)})} />
+                      <div className="flex justify-between text-[10px] text-slate-500 mt-1">
+                          <span>0.0 (Kaku/Robotik)</span>
+                          <span>1.0 (Normal)</span>
+                          <span>2.0 (Sangat Liar)</span>
+                      </div>
+                  </div>
+                  
+                  <div>
+                      <label className="block text-sm text-slate-400 mb-1">Max Tokens (Panjang Jawaban)</label>
+                      <input required type="number" min="100" max="8000" step="50" className="w-full bg-black/20 border border-white/10 rounded-lg p-3" value={formData.max_tokens} onChange={e=>setFormData({...formData, max_tokens: parseInt(e.target.value)})} />
+                  </div>
+                  
                   <div className="md:col-span-2">
                       <label className="block text-sm text-slate-400 mb-1">Soul / Personality</label>
                       <textarea required rows={2} className="w-full bg-black/20 border border-white/10 rounded-lg p-3" value={formData.soul} onChange={e=>setFormData({...formData, soul: e.target.value})} />

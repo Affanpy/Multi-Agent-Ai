@@ -10,6 +10,7 @@ export const useStore = create((set, get) => ({
   isTyping: false,
   typingAgent: null,
   activeOrder: [],
+  isCreatingSession: false,
   
   fetchAgents: async () => {
     try {
@@ -57,16 +58,25 @@ export const useStore = create((set, get) => ({
   },
 
   createSession: async () => {
-    const res = await fetch(`${API_URL}/sessions`, { method: 'POST' });
-    if (res.ok) {
-      const newSession = await res.json();
-      set(state => ({ 
-         sessions: [newSession, ...state.sessions],
-         currentSession: newSession,
-         messages: []
-      }));
-      return newSession;
+    if (get().isCreatingSession) return;
+    set({ isCreatingSession: true });
+    
+    try {
+      const res = await fetch(`${API_URL}/sessions`, { method: 'POST' });
+      if (res.ok) {
+        const newSession = await res.json();
+        set(state => ({ 
+           sessions: [newSession, ...state.sessions],
+           currentSession: newSession,
+           messages: [],
+           isCreatingSession: false
+        }));
+        return newSession;
+      }
+    } catch (e) {
+      console.error("Gagal membuat sesi:", e);
     }
+    set({ isCreatingSession: false });
   },
   
   loadSession: async (id) => {

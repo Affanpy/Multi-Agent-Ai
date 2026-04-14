@@ -38,7 +38,7 @@ export default function SessionHistory() {
                     </div>
                     <div>
                         <h3 className="text-lg font-semibold text-slate-100">{session.title}</h3>
-                        <p className="text-sm text-slate-400">{new Date(session.created_at).toLocaleString()}</p>
+                        <p className="text-sm text-slate-400">{new Date(session.created_at.endsWith('Z') ? session.created_at : session.created_at + 'Z').toLocaleString()}</p>
                     </div>
                 </div>
                 

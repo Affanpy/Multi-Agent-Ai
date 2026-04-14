@@ -43,7 +43,13 @@ export function useWebSocket(sessionId) {
         case 'moderator_decision':
           setActiveOrder(data.speaking_order);
           if (data.speaking_order.length > 0) {
-             setToastEvent(`Moderator decided order: ${data.speaking_order.join(', ')}`);
+             const currentAgents = useStore.getState().agents;
+             const names = data.speaking_order.map(id => {
+                const agent = currentAgents.find(a => a.id === id);
+                return agent ? agent.name : 'Unknown';
+             });
+             setToastEvent(`💡 Moderator decided turn: ${names.join(' ➔ ')}`);
+             setTimeout(() => setToastEvent(null), 4000);
           }
           break;
         case 'agent_typing':

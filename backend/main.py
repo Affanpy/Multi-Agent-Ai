@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import re
 from typing import List, Dict
 from datetime import datetime
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException
@@ -283,9 +284,26 @@ async def websocket_chat(websocket: WebSocket, session_id: str, db: AsyncSession
                               })
                               await asyncio.sleep(0.01)
                      except Exception as e:
-                         collected_tokens.append(f"\n[Error generating response: {str(e)}]")
+                         # Fix #5: Error Handling Graceful Fallback
+                         error_msg = f"\n[System: {agent_info['name']} mengalami gangguan koneksi API. Berlanjut ke agen berikutnya...]"
+                         collected_tokens.append(error_msg)
+                         await manager.broadcast(session_id, {
+                             "type": "agent_stream",
+                             "agent_id": aid,
+                             "token": error_msg
+                         })
                      
                      full_message = "".join(collected_tokens)
+                     
+                     # Fix #2: Post-Processing Regex Filter untuk membuang Prefix Halusinasi
+                     all_names = [a.name for a in active_agents]
+                     for name in all_names:
+                         # Hapus pola seperti [Nama]: atau Nama: atau **Nama**: di awal baris baru
+                         pattern = rf'(?m)^\s*\[?{re.escape(name)}\]?\s*[::]\s*|^\s*\*{{1,2}}{re.escape(name)}\*{{1,2}}\s*[::]\s*'
+                         full_message = re.sub(pattern, '', full_message, flags=re.IGNORECASE).strip()
+                         
+                     # Bersihkan format pemisah seperti '---' di awal pesan yang sering terbawa
+                     full_message = re.sub(r'^(?:---\s*|\n)+', '', full_message).strip()
                      
                      agent_msg = Message(session_id=session_id, role="agent", agent_id=aid, content=full_message)
                      db.add(agent_msg)

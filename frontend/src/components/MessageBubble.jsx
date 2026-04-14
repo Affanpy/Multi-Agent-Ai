@@ -33,7 +33,7 @@ export default function MessageBubble({ message }) {
         
         <div className="text-[10px] text-slate-500 mt-1 px-1 flex items-center gap-2">
             {!isUser && agent && <span className="uppercase text-xs font-bold tracking-wider">{agent.model}</span>}
-            <span>{message.timestamp ? new Date(message.timestamp).toLocaleTimeString() : ''}</span>
+            <span>{message.timestamp ? new Date(message.timestamp.endsWith('Z') ? message.timestamp : message.timestamp + 'Z').toLocaleTimeString() : ''}</span>
         </div>
       </div>
     </div>
