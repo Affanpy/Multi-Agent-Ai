@@ -44,7 +44,8 @@ export function useWebSocket(sessionId) {
             content: data.content, 
             timestamp: data.timestamp,
             is_private: data.is_private,
-            target_agent_id: data.target_agent_id
+            target_agent_id: data.target_agent_id,
+            replyToAgent: data.reply_to_agent_name || null
           });
           break;
         case 'moderator_decision':
@@ -89,9 +90,11 @@ export function useWebSocket(sessionId) {
     };
   }, [sessionId, addMessage, appendStreamToken, finalizeAgentMessage, setTyping, setActiveOrder]);
 
-  const sendMessage = (content, isPrivate = false, targetAgentId = null) => {
+  const sendMessage = (content, isPrivate = false, targetAgentId = null, replyToAgentId = null) => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      if (!isPrivate) {
+      const moderatorEnabled = useStore.getState().moderatorEnabled;
+      // Reply bypass moderator; private juga bypass
+      if (!isPrivate && !replyToAgentId && moderatorEnabled) {
          useStore.getState().setModerating(true);
       }
       ws.current.send(JSON.stringify({ 
@@ -99,7 +102,9 @@ export function useWebSocket(sessionId) {
           content, 
           session_id: sessionId,
           is_private: isPrivate,
-          target_agent_id: targetAgentId
+          target_agent_id: targetAgentId,
+          moderator_enabled: moderatorEnabled,
+          reply_to_agent_id: replyToAgentId
       }));
     } else {
       console.warn("WebSocket not connected");

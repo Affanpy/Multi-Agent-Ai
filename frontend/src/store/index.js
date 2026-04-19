@@ -13,9 +13,13 @@ export const useStore = create((set, get) => ({
   isCreatingSession: false,
   activePrivateAgent: null,
   isModerating: false,
+  moderatorEnabled: true,
+  replyTo: null,
   
   setModerating: (status) => set({ isModerating: status }),
   setActivePrivateAgent: (agentId) => set({ activePrivateAgent: agentId }),
+  toggleModerator: () => set(state => ({ moderatorEnabled: !state.moderatorEnabled })),
+  setReplyTo: (message) => set({ replyTo: message }),
   
   fetchAgents: async () => {
     try {
@@ -54,7 +58,24 @@ export const useStore = create((set, get) => ({
       set(state => ({ agents: state.agents.map(a => a.id === id ? updatedAgent : a) }));
     }
   },
-  
+
+  toggleAgentActive: async (id) => {
+    const res = await fetch(`${API_URL}/agents/${id}/toggle`, { method: 'PATCH' });
+    if (res.ok) {
+      const updated = await res.json();
+      set(state => ({ agents: state.agents.map(a => a.id === id ? { ...a, is_active: updated.is_active } : a) }));
+    }
+  },
+
+  reorderAgents: async (orderedAgents) => {
+    set({ agents: orderedAgents });
+    await fetch(`${API_URL}/agents/reorder`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ordered_ids: orderedAgents.map(a => a.id) })
+    });
+  },
+
   fetchSessions: async () => {
     try {
       const res = await fetch(`${API_URL}/sessions`);

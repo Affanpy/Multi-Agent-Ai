@@ -90,6 +90,28 @@ async def delete_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
     await db.commit()
     return {"message": "Agent deleted successfully"}
 
+@app.put("/api/agents/reorder")
+async def reorder_agents(payload: dict, db: AsyncSession = Depends(get_db)):
+    ordered_ids = payload.get("ordered_ids", [])
+    for idx, agent_id in enumerate(ordered_ids):
+        result = await db.execute(select(Agent).where(Agent.id == agent_id))
+        db_agent = result.scalars().first()
+        if db_agent:
+            db_agent.order = idx
+    await db.commit()
+    return {"message": "Agents reordered successfully"}
+
+@app.patch("/api/agents/{agent_id}/toggle")
+async def toggle_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    db_agent = result.scalars().first()
+    if not db_agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    db_agent.is_active = not db_agent.is_active
+    await db.commit()
+    await db.refresh(db_agent)
+    return db_agent
+
 @app.post("/api/agents/{agent_id}/test")
 async def test_agent(agent_id: str, payload: dict, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Agent).where(Agent.id == agent_id))
@@ -202,6 +224,8 @@ async def websocket_chat(websocket: WebSocket, session_id: str, db: AsyncSession
                     
                 is_private = data.get("is_private", False)
                 target_agent_id = data.get("target_agent_id")
+                moderator_enabled = data.get("moderator_enabled", True)
+                reply_to_agent_id = data.get("reply_to_agent_id")
                 
                 user_msg = Message(
                     session_id=session_id, 
@@ -219,15 +243,25 @@ async def websocket_chat(websocket: WebSocket, session_id: str, db: AsyncSession
                 
                 await db.commit()
                 
+                # Resolve reply agent name untuk broadcast
+                _reply_agent_name = None
+                if reply_to_agent_id:
+                    # Kita perlu agents_dict tapi belum di-build, jadi query langsung
+                    _reply_res = await db.execute(select(Agent).where(Agent.id == reply_to_agent_id))
+                    _reply_agent = _reply_res.scalars().first()
+                    if _reply_agent:
+                        _reply_agent_name = _reply_agent.name
+
                 await manager.broadcast(session_id, {
                     "type": "user_message",
                     "content": user_msg_content,
                     "timestamp": user_msg.timestamp.isoformat(),
                     "is_private": is_private,
-                    "target_agent_id": target_agent_id
+                    "target_agent_id": target_agent_id,
+                    "reply_to_agent_name": _reply_agent_name
                 })
                 
-                agent_res = await db.execute(select(Agent).where(Agent.is_active == True))
+                agent_res = await db.execute(select(Agent).where(Agent.is_active == True).order_by(Agent.order.asc()))
                 active_agents = list(agent_res.scalars().all())
                 if not active_agents:
                     await manager.broadcast(session_id, {"type": "error", "content": "No active agents available"})
@@ -262,6 +296,26 @@ async def websocket_chat(websocket: WebSocket, session_id: str, db: AsyncSession
                 if is_private:
                      speaking_order = [target_agent_id] if target_agent_id in agents_dict else []
                      context_hints = {target_agent_id: "PERINGATAN KRITIS: Kamu ditarik ke obrolan 1-on-1 private. Jawab langsung secara spesifik pesannya, ini rahasia, ABAIKAN jalannya grup."}
+                elif reply_to_agent_id and reply_to_agent_id in agents_dict:
+                     # Reply langsung: bypass moderator, hanya agen target yang menjawab
+                     speaking_order = [reply_to_agent_id]
+                     reply_agent_name = agents_dict[reply_to_agent_id]["name"]
+                     context_hints = {reply_to_agent_id: f"User secara khusus membalas pesanmu dan mengarahkan pertanyaan ini langsung padamu. Jawab secara langsung dan fokus."}
+                     # Update broadcast agar frontend tahu ini reply
+                     await manager.broadcast(session_id, {
+                          "type": "moderator_decision",
+                          "speaking_order": speaking_order,
+                          "reasoning": f"User membalas langsung ke {reply_agent_name}"
+                     })
+                elif not moderator_enabled:
+                     # Mode Sequential: Semua agen menjawab berurutan tanpa moderator
+                     speaking_order = [a.id for a in active_agents]
+                     context_hints = {}
+                     await manager.broadcast(session_id, {
+                          "type": "moderator_decision",
+                          "speaking_order": speaking_order,
+                          "reasoning": "Moderator dinonaktifkan — semua agen menjawab berurutan."
+                     })
                 else:
                      mod_decision = await determine_speaking_order(
                           active_agents=[agents_dict[aid] for aid in agents_dict],

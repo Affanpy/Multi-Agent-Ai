@@ -6,14 +6,15 @@ import MessageBubble from '../components/MessageBubble';
 import TypingIndicator from '../components/TypingIndicator';
 import PrivateDrawer from '../components/PrivateDrawer';
 import { AnimatePresence } from 'framer-motion';
-import { Send, PlusCircle } from 'lucide-react';
+import { Send, PlusCircle, X, Reply } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export default function ChatRoom() {
   const { 
     currentSession, messages, isTyping, typingAgent, 
     createSession, clearSession, activePrivateAgent, 
-    setActivePrivateAgent, agents, isModerating 
+    setActivePrivateAgent, agents, isModerating,
+    replyTo, setReplyTo
   } = useStore();
   const [input, setInput] = useState('');
   const messagesEndRef = useRef(null);
@@ -37,8 +38,9 @@ export default function ChatRoom() {
   const handleSend = (e) => {
     e.preventDefault();
     if (!input.trim() || status !== 'connected') return;
-    sendMessage(input);
+    sendMessage(input, false, null, replyTo?.agentId || null);
     setInput('');
+    setReplyTo(null);
   };
 
   const handleNewSession = async () => {
@@ -122,15 +124,34 @@ export default function ChatRoom() {
 
         {/* Input Area */}
         <div className="p-4 bg-white/5 border-t border-white/10 relative z-20">
+          {/* Reply Preview Bar */}
+          {replyTo && (
+            <div className="flex items-center gap-3 mb-3 max-w-4xl mx-auto bg-indigo-900/30 border border-indigo-500/20 rounded-lg px-4 py-2">
+              <Reply size={14} className="text-indigo-400 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-indigo-300">Membalas {replyTo.agentEmoji} {replyTo.agentName}</p>
+                <p className="text-[10px] text-slate-400 truncate">{replyTo.snippet}...</p>
+              </div>
+              <button 
+                onClick={() => setReplyTo(null)} 
+                className="p-1 text-slate-400 hover:text-white hover:bg-white/10 rounded transition-colors flex-shrink-0"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
+
           <form onSubmit={handleSend} className="flex gap-3 relative max-w-4xl mx-auto">
              <input 
                type="text" 
                value={input}
                onChange={(e) => setInput(e.target.value)}
                disabled={activeAgentsCount === 0 || status !== 'connected'}
-               placeholder={activeAgentsCount === 0 
-                  ? "⚠️ Tidak ada agen aktif. Hidupkan agen di menu Agents terlebih dahulu..." 
-                  : "Type a message to start the brain trust..."}
+               placeholder={replyTo 
+                  ? `Balas ke ${replyTo.agentName}...`
+                  : activeAgentsCount === 0 
+                     ? "⚠️ Tidak ada agen aktif. Hidupkan agen di menu Agents terlebih dahulu..." 
+                     : "Type a message to start the brain trust..."}
                className="flex-1 bg-black/20 border border-white/10 rounded-xl px-5 py-4 focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-slate-500 disabled:opacity-50 disabled:cursor-not-allowed"
              />
               <button 
