@@ -38,9 +38,17 @@ export function useWebSocket(sessionId) {
           // Or if client added exactly this one, we skip. But usually client sends and server rebroadcasts.
           // To avoid duplicates, client should not add speculatively if it trusts the connection.
           // However for snappiness, client might add. If so, we'd need ID tracking. We'll simply let server bounce it back for now.
-          addMessage({ id: data.timestamp, role: 'user', content: data.content, timestamp: data.timestamp });
+          addMessage({ 
+            id: data.timestamp, 
+            role: 'user', 
+            content: data.content, 
+            timestamp: data.timestamp,
+            is_private: data.is_private,
+            target_agent_id: data.target_agent_id
+          });
           break;
         case 'moderator_decision':
+          useStore.getState().setModerating(false);
           setActiveOrder(data.speaking_order);
           if (data.speaking_order.length > 0) {
              const currentAgents = useStore.getState().agents;
@@ -56,10 +64,10 @@ export function useWebSocket(sessionId) {
           setTyping(true, { id: data.agent_id, name: data.agent_name, emoji: data.agent_emoji });
           break;
         case 'agent_stream':
-          appendStreamToken(data.agent_id, data.token);
+          appendStreamToken(data.agent_id, data.token, data.is_private, data.target_agent_id);
           break;
         case 'agent_done':
-          finalizeAgentMessage(data.agent_id, data.full_message, data.timestamp);
+          finalizeAgentMessage(data.agent_id, data.full_message, data.timestamp, data.is_private, data.target_agent_id);
           setTyping(false);
           break;
         case 'round_complete':
@@ -81,9 +89,18 @@ export function useWebSocket(sessionId) {
     };
   }, [sessionId, addMessage, appendStreamToken, finalizeAgentMessage, setTyping, setActiveOrder]);
 
-  const sendMessage = (content) => {
+  const sendMessage = (content, isPrivate = false, targetAgentId = null) => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ type: 'chat', content, session_id: sessionId }));
+      if (!isPrivate) {
+         useStore.getState().setModerating(true);
+      }
+      ws.current.send(JSON.stringify({ 
+          type: 'chat', 
+          content, 
+          session_id: sessionId,
+          is_private: isPrivate,
+          target_agent_id: targetAgentId
+      }));
     } else {
       console.warn("WebSocket not connected");
     }

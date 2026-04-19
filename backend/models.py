@@ -42,6 +42,8 @@ class Message(Base):
     agent_id = Column(String, ForeignKey("agents.id"), nullable=True) # None if user or system
     content = Column(String, nullable=False)
     timestamp = Column(DateTime, default=datetime.utcnow)
+    is_private = Column(Boolean, default=False)
+    target_agent_id = Column(String, ForeignKey("agents.id"), nullable=True)
     
     session = relationship("Session", back_populates="messages")
-    agent = relationship("Agent")
+    agent = relationship("Agent", foreign_keys=[agent_id])

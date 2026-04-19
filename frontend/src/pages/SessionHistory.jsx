@@ -17,7 +17,8 @@ export default function SessionHistory() {
   };
 
   return (
-    <div className="h-full overflow-y-auto p-6 md:p-10 w-full max-w-5xl mx-auto pb-20">
+    <div className="h-full overflow-y-auto">
+    <div className="p-6 md:p-10 w-full max-w-5xl mx-auto pb-20">
       <div className="mb-10">
           <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-cyan-400">Session History</h1>
           <p className="text-slate-400 mt-2">Resume past brainstorming discussions.</p>
@@ -53,6 +54,7 @@ export default function SessionHistory() {
             </div>
         ))}
       </div>
+    </div>
     </div>
   );
 }

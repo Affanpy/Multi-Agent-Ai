@@ -200,7 +200,16 @@ async def websocket_chat(websocket: WebSocket, session_id: str, db: AsyncSession
                 if not user_msg_content:
                     continue
                     
-                user_msg = Message(session_id=session_id, role="user", content=user_msg_content)
+                is_private = data.get("is_private", False)
+                target_agent_id = data.get("target_agent_id")
+                
+                user_msg = Message(
+                    session_id=session_id, 
+                    role="user", 
+                    content=user_msg_content, 
+                    is_private=is_private, 
+                    target_agent_id=target_agent_id
+                )
                 db.add(user_msg)
                 
                 res_session = await db.execute(select(Session).where(Session.id == session_id))
@@ -213,7 +222,9 @@ async def websocket_chat(websocket: WebSocket, session_id: str, db: AsyncSession
                 await manager.broadcast(session_id, {
                     "type": "user_message",
                     "content": user_msg_content,
-                    "timestamp": user_msg.timestamp.isoformat()
+                    "timestamp": user_msg.timestamp.isoformat(),
+                    "is_private": is_private,
+                    "target_agent_id": target_agent_id
                 })
                 
                 agent_res = await db.execute(select(Agent).where(Agent.is_active == True))
@@ -237,28 +248,33 @@ async def websocket_chat(websocket: WebSocket, session_id: str, db: AsyncSession
                 
                 raw_history = []
                 for m in chat_history_db:
+                    # Filter cerdas memori privat
+                    if m.is_private:
+                        if not is_private or str(m.target_agent_id) != str(target_agent_id):
+                            continue
+                            
                     if m.role == "user":
                         raw_history.append({"role": "user", "name": "User", "content": m.content})
                     elif m.role == "agent":
                         agent_name = agents_dict[m.agent_id]["name"] if m.agent_id in agents_dict else "Agent"
                         raw_history.append({"role": "agent", "agent_id": str(m.agent_id), "name": agent_name, "content": m.content})
                 
-                history_for_moderator = raw_history[-10:]
-                
-                mod_decision = await determine_speaking_order(
-                     active_agents=[agents_dict[aid] for aid in agents_dict],
-                     user_message=user_msg_content,
-                     recent_history=history_for_moderator
-                )
-                
-                speaking_order = mod_decision.get("speaking_order", [])
-                context_hints = mod_decision.get("context_hints", {})
-                
-                await manager.broadcast(session_id, {
-                     "type": "moderator_decision",
-                     "speaking_order": speaking_order,
-                     "reasoning": mod_decision.get("reasoning", "")
-                })
+                if is_private:
+                     speaking_order = [target_agent_id] if target_agent_id in agents_dict else []
+                     context_hints = {target_agent_id: "PERINGATAN KRITIS: Kamu ditarik ke obrolan 1-on-1 private. Jawab langsung secara spesifik pesannya, ini rahasia, ABAIKAN jalannya grup."}
+                else:
+                     mod_decision = await determine_speaking_order(
+                          active_agents=[agents_dict[aid] for aid in agents_dict],
+                          user_message=user_msg_content,
+                          recent_history=raw_history[-10:]
+                     )
+                     speaking_order = mod_decision.get("speaking_order", [])
+                     context_hints = mod_decision.get("context_hints", {})
+                     await manager.broadcast(session_id, {
+                          "type": "moderator_decision",
+                          "speaking_order": speaking_order,
+                          "reasoning": mod_decision.get("reasoning", "")
+                     })
                 
                 for aid in speaking_order:
                      if aid not in agents_dict: continue
@@ -280,7 +296,9 @@ async def websocket_chat(websocket: WebSocket, session_id: str, db: AsyncSession
                               await manager.broadcast(session_id, {
                                    "type": "agent_stream",
                                    "agent_id": aid,
-                                   "token": token
+                                   "token": token,
+                                   "is_private": is_private,
+                                   "target_agent_id": target_agent_id
                               })
                               await asyncio.sleep(0.01)
                      except Exception as e:
@@ -290,7 +308,9 @@ async def websocket_chat(websocket: WebSocket, session_id: str, db: AsyncSession
                          await manager.broadcast(session_id, {
                              "type": "agent_stream",
                              "agent_id": aid,
-                             "token": error_msg
+                             "token": error_msg,
+                             "is_private": is_private,
+                             "target_agent_id": target_agent_id
                          })
                      
                      full_message = "".join(collected_tokens)
@@ -305,7 +325,14 @@ async def websocket_chat(websocket: WebSocket, session_id: str, db: AsyncSession
                      # Bersihkan format pemisah seperti '---' di awal pesan yang sering terbawa
                      full_message = re.sub(r'^(?:---\s*|\n)+', '', full_message).strip()
                      
-                     agent_msg = Message(session_id=session_id, role="agent", agent_id=aid, content=full_message)
+                     agent_msg = Message(
+                         session_id=session_id, 
+                         role="agent", 
+                         agent_id=aid, 
+                         content=full_message,
+                         is_private=is_private,
+                         target_agent_id=target_agent_id
+                     )
                      db.add(agent_msg)
                      await db.commit()
                      
@@ -322,7 +349,9 @@ async def websocket_chat(websocket: WebSocket, session_id: str, db: AsyncSession
                           "agent_name": agent_info["name"],
                           "agent_emoji": agent_info["avatar_emoji"],
                           "full_message": full_message,
-                          "timestamp": agent_msg.timestamp.isoformat()
+                          "timestamp": agent_msg.timestamp.isoformat(),
+                          "is_private": is_private,
+                          "target_agent_id": target_agent_id
                      })
                      
                 await manager.broadcast(session_id, {"type": "round_complete"})

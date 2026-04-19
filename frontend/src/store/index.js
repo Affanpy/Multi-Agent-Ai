@@ -11,6 +11,11 @@ export const useStore = create((set, get) => ({
   typingAgent: null,
   activeOrder: [],
   isCreatingSession: false,
+  activePrivateAgent: null,
+  isModerating: false,
+  
+  setModerating: (status) => set({ isModerating: status }),
+  setActivePrivateAgent: (agentId) => set({ activePrivateAgent: agentId }),
   
   fetchAgents: async () => {
     try {
@@ -102,11 +107,11 @@ export const useStore = create((set, get) => ({
   
   addMessage: (msg) => set(state => ({ messages: [...state.messages, msg] })),
   
-  appendStreamToken: (agentId, token) => set(state => {
+  appendStreamToken: (agentId, token, isPrivate = false, targetAgentId = null) => set(state => {
     const messages = [...state.messages];
     const lastMsg = messages[messages.length - 1];
     
-    if (lastMsg && lastMsg.agent_id === agentId && lastMsg.isStreaming) {
+    if (lastMsg && lastMsg.agent_id === agentId && lastMsg.isStreaming && lastMsg.is_private === isPrivate) {
       lastMsg.content += token;
     } else {
       messages.push({
@@ -114,16 +119,18 @@ export const useStore = create((set, get) => ({
         role: 'agent',
         agent_id: agentId,
         content: token,
-        isStreaming: true
+        isStreaming: true,
+        is_private: isPrivate,
+        target_agent_id: targetAgentId
       });
     }
     return { messages };
   }),
   
-  finalizeAgentMessage: (agentId, fullContent, timestamp) => set(state => {
+  finalizeAgentMessage: (agentId, fullContent, timestamp, isPrivate = false, targetAgentId = null) => set(state => {
     const messages = [...state.messages];
     const lastMsg = messages[messages.length - 1];
-    if (lastMsg && lastMsg.agent_id === agentId && lastMsg.isStreaming) {
+    if (lastMsg && lastMsg.agent_id === agentId && lastMsg.isStreaming && lastMsg.is_private === isPrivate) {
       lastMsg.content = fullContent;
       lastMsg.isStreaming = false;
       if (timestamp) lastMsg.timestamp = timestamp;
@@ -134,7 +141,9 @@ export const useStore = create((set, get) => ({
             agent_id: agentId,
             content: fullContent,
             timestamp: timestamp,
-            isStreaming: false
+            isStreaming: false,
+            is_private: isPrivate,
+            target_agent_id: targetAgentId
         });
     }
     return { messages, isTyping: false };

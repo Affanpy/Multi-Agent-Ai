@@ -4,11 +4,17 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import Sidebar from '../components/Sidebar';
 import MessageBubble from '../components/MessageBubble';
 import TypingIndicator from '../components/TypingIndicator';
+import PrivateDrawer from '../components/PrivateDrawer';
+import { AnimatePresence } from 'framer-motion';
 import { Send, PlusCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export default function ChatRoom() {
-  const { currentSession, messages, isTyping, typingAgent, createSession, clearSession } = useStore();
+  const { 
+    currentSession, messages, isTyping, typingAgent, 
+    createSession, clearSession, activePrivateAgent, 
+    setActivePrivateAgent, agents, isModerating 
+  } = useStore();
   const [input, setInput] = useState('');
   const messagesEndRef = useRef(null);
   const navigate = useNavigate();
@@ -21,9 +27,12 @@ export default function ChatRoom() {
   
   const { status, sendMessage, toastEvent } = useWebSocket(currentSession?.id);
 
+  const publicMessages = messages.filter(m => !m.is_private);
+  const activeAgentsCount = agents.filter(a => a.is_active).length;
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isTyping]);
+  }, [publicMessages, isTyping]);
 
   const handleSend = (e) => {
     e.preventDefault();
@@ -38,9 +47,23 @@ export default function ChatRoom() {
   };
 
   return (
-    <div className="h-full w-full p-4 md:p-6 flex overflow-hidden">
+    <div className="h-full w-full p-4 md:p-6 flex overflow-hidden relative">
       <Sidebar />
       <div className="flex-1 glass-panel flex flex-col overflow-hidden relative">
+        {/* Private Whisper Overlay Drawer — wrapper statis agar tidak mengganggu flex layout */}
+        <div className="absolute inset-0 pointer-events-none z-50 overflow-hidden">
+          <AnimatePresence>
+            {activePrivateAgent && (
+               <PrivateDrawer 
+                  agent={activePrivateAgent} 
+                  onClose={() => setActivePrivateAgent(null)} 
+                  sendMessage={sendMessage} 
+                  status={status} 
+               />
+            )}
+          </AnimatePresence>
+        </div>
+        
         {toastEvent && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-indigo-600/90 backdrop-blur-md px-5 py-2 rounded-full text-sm font-medium z-10 animate-fade-in shadow-xl shadow-indigo-500/20 border border-indigo-400">
             {toastEvent}
@@ -58,25 +81,40 @@ export default function ChatRoom() {
               </span>
            </div>
            
-           <button onClick={handleNewSession} className="glass-button flex items-center gap-2 px-4 py-2 bg-indigo-500/20 text-indigo-300 rounded-lg">
+           <button 
+              onClick={handleNewSession} 
+              disabled={messages.length === 0}
+              className="glass-button flex items-center gap-2 px-4 py-2 bg-indigo-500/20 text-indigo-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+           >
               <PlusCircle size={18} /> New Session
            </button>
         </div>
 
         {/* Chat Area */}
         <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2">
-           {messages.length === 0 && (
+           {publicMessages.length === 0 && (
              <div className="h-full flex flex-col items-center justify-center text-slate-500">
                <div className="text-6xl mb-4">💬</div>
-               <p className="text-lg">Start the conversation...</p>
+               <p className="text-lg">Mulai forum diskusi publik...</p>
              </div>
            )}
            
-           {messages.map(msg => (
+           {publicMessages.map(msg => (
              <MessageBubble key={msg.id} message={msg} />
            ))}
+
+           {isModerating && (
+             <div className="flex items-center gap-4 p-4 glass-panel bg-indigo-900/10 max-w-[90%] md:max-w-[70%] border border-indigo-500/20">
+               <div className="flex gap-1.5">
+                 <div className="w-2 h-2 bg-indigo-400/80 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                 <div className="w-2 h-2 bg-indigo-400/80 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                 <div className="w-2 h-2 bg-indigo-400/80 rounded-full animate-bounce"></div>
+               </div>
+               <span className="text-sm font-medium text-indigo-300/80 italic">Moderator sedang merancang giliran diskusi...</span>
+             </div>
+           )}
            
-           {isTyping && typingAgent && (
+           {isTyping && typingAgent && !messages.some(m => m.isStreaming && m.agent_id === typingAgent.id) && (
              <TypingIndicator name={typingAgent.name} emoji={typingAgent.emoji} />
            )}
            <div ref={messagesEndRef} />
@@ -89,13 +127,16 @@ export default function ChatRoom() {
                type="text" 
                value={input}
                onChange={(e) => setInput(e.target.value)}
-               placeholder="Type a message to start the brain trust..."
-               className="flex-1 bg-black/20 border border-white/10 rounded-xl px-5 py-4 focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-slate-500"
+               disabled={activeAgentsCount === 0 || status !== 'connected'}
+               placeholder={activeAgentsCount === 0 
+                  ? "⚠️ Tidak ada agen aktif. Hidupkan agen di menu Agents terlebih dahulu..." 
+                  : "Type a message to start the brain trust..."}
+               className="flex-1 bg-black/20 border border-white/10 rounded-xl px-5 py-4 focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-slate-500 disabled:opacity-50 disabled:cursor-not-allowed"
              />
-             <button 
+              <button 
                type="submit" 
-               disabled={status !== 'connected' || !input.trim() || isTyping}
-               className="glass-button bg-indigo-600 hover:bg-indigo-500 text-white p-4 rounded-xl flex items-center justify-center disabled:opacity-50"
+               disabled={status !== 'connected' || !input.trim() || isTyping || isModerating || activeAgentsCount === 0}
+               className="glass-button bg-indigo-600 hover:bg-indigo-500 text-white p-4 rounded-xl flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
              >
                <Send size={20} />
              </button>

@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { useStore } from '../store';
 
 export default function MessageBubble({ message }) {
@@ -6,9 +7,51 @@ export default function MessageBubble({ message }) {
   const { agents } = useStore();
   
   const agent = isUser ? null : agents.find(a => a.id === message.agent_id);
+
+  const [displayedContent, setDisplayedContent] = useState(message.isStreaming ? '' : message.content);
+  const bufferRef = useRef(message.content);
+
+  useEffect(() => {
+    bufferRef.current = message.content;
+  }, [message.content]);
+
+  useEffect(() => {
+    if (!message.isStreaming && bufferRef.current.length === displayedContent.length) {
+       return; // Sejarah statis tidak butuh loop interval
+    }
+    
+    let localInterval;
+    localInterval = setInterval(() => {
+      setDisplayedContent((current) => {
+        const target = bufferRef.current;
+        if (current.length < target.length) {
+          // Dinamis catch-up step untuk mencegah macet jika token melimpah
+          let step = 1; // Kembali ke ultra-smooth character mode (1 char per tick)
+          const gap = target.length - current.length;
+          if (gap > 20) step = 3;
+          if (gap > 60) step = 8;
+          
+          // Fase Draining: Tuntaskan mulus dengan ngebut sedikit
+          if (!message.isStreaming) step = Math.max(step, Math.ceil(gap / 3)); 
+          
+          return current + target.substring(current.length, current.length + step);
+        } else if (!message.isStreaming) {
+          clearInterval(localInterval);
+        }
+        return current;
+      });
+    }, 20); // 20ms (50 FPS) sangat ringan dan memberikan sensasi mengalir yang jauh lebih memanjakan
+
+    return () => clearInterval(localInterval);
+  }, [message.isStreaming]);
   
   return (
-    <div className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'} mb-6 animate-fade-in`}>
+    <motion.div
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'} mb-6`}
+    >
       <div className={`max-w-[80%] md:max-w-[70%] flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
         {!isUser && agent && (
           <div className="flex items-center gap-2 mb-1 px-1">
@@ -24,7 +67,7 @@ export default function MessageBubble({ message }) {
             : 'bg-white/10 backdrop-blur-md border border-white/10 text-slate-100 rounded-tl-none'
         }`}>
           <div className="whitespace-pre-wrap text-sm leading-relaxed font-sans">
-            {message.content}
+            {displayedContent}
             {message.isStreaming && (
               <span className="inline-block w-2 h-4 ml-1 bg-emerald-400 animate-pulse align-middle" />
             )}
@@ -36,6 +79,6 @@ export default function MessageBubble({ message }) {
             <span>{message.timestamp ? new Date(message.timestamp.endsWith('Z') ? message.timestamp : message.timestamp + 'Z').toLocaleTimeString() : ''}</span>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

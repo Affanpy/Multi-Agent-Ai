@@ -43,6 +43,8 @@ class MessageResponse(BaseModel):
     agent_id: Optional[str] = None
     content: str
     timestamp: datetime
+    is_private: Optional[bool] = False
+    target_agent_id: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
 class SessionResponse(BaseModel):
