@@ -196,6 +196,25 @@ export default function MessageBubble({ message }) {
     );
   }
 
+  // Render khusus untuk System Message (Debate dll)
+  if (message.role === 'system') {
+    return (
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="flex w-full justify-center mb-6 my-2"
+      >
+        <div className="px-6 py-3 rounded-2xl bg-indigo-900/40 border border-indigo-500/30 text-center max-w-[85%] shadow-lg">
+          <div className="text-sm leading-relaxed font-sans text-indigo-100 prose-invert max-w-none">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+              {message.content}
+            </ReactMarkdown>
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 15 }}

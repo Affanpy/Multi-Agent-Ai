@@ -49,6 +49,14 @@ export function useWebSocket(sessionId) {
             fileInfo: data.file_info || null
           });
           break;
+        case 'debate_system':
+          addMessage({
+            id: `sys-${Date.now()}-${Math.random()}`,
+            role: 'system',
+            content: data.content,
+            timestamp: new Date().toISOString()
+          });
+          break;
         case 'moderator_decision':
           useStore.getState().setModerating(false);
           setActiveOrder(data.speaking_order);
@@ -113,5 +121,13 @@ export function useWebSocket(sessionId) {
     }
   };
 
-  return { status, sendMessage, toastEvent };
+  const sendCommand = (commandData) => {
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify(commandData));
+    } else {
+      console.warn("WebSocket not connected");
+    }
+  };
+
+  return { status, sendMessage, sendCommand, toastEvent };
 }

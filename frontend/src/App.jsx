@@ -1,15 +1,18 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { BrainCircuit, Users, History } from 'lucide-react';
+import { useStore } from './store';
+import { BrainCircuit, Users, History, Sword } from 'lucide-react';
 import ChatRoom from './pages/ChatRoom';
 import AgentManager from './pages/AgentManager';
 import SessionHistory from './pages/SessionHistory';
+import DebateArena from './pages/DebateArena';
 
 function Navigation() {
   const location = useLocation();
   
   const navItems = [
     { path: '/', label: 'Brainstorm', icon: BrainCircuit },
+    { path: '/debate', label: 'Arena', icon: Sword },
     { path: '/agents', label: 'Agents', icon: Users },
     { path: '/sessions', label: 'History', icon: History },
   ];
@@ -45,6 +48,12 @@ function Navigation() {
 }
 
 function App() {
+  const { fetchAgents } = useStore();
+
+  useEffect(() => {
+    fetchAgents();
+  }, [fetchAgents]);
+
   return (
     <BrowserRouter>
       <div className="bg-slate-900 h-screen w-screen flex flex-col text-slate-100 font-sans selection:bg-indigo-500/30 overflow-hidden">
@@ -52,6 +61,7 @@ function App() {
         <main className="flex-1 overflow-hidden relative">
           <Routes>
             <Route path="/" element={<ChatRoom />} />
+            <Route path="/debate" element={<DebateArena />} />
             <Route path="/agents" element={<AgentManager />} />
             <Route path="/sessions" element={<SessionHistory />} />
           </Routes>

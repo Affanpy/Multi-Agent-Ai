@@ -17,6 +17,7 @@ from security import encrypt_api_key
 from orchestrator import determine_speaking_order, generate_summary
 from agent_runner import run_agent_stream
 from file_handler import process_uploaded_file, model_supports_vision, SUPPORTED_IMAGE_TYPES, SUPPORTED_DOC_TYPES
+from debate_manager import start_debate_task, stop_debate_task, active_debates
 
 app = FastAPI(title="AgentRoom API")
 
@@ -280,6 +281,14 @@ async def websocket_chat(websocket: WebSocket, session_id: str, db: AsyncSession
                 await websocket.send_json({"type": "pong"})
                 continue
                 
+            if data.get("type") == "start_debate":
+                start_debate_task(session_id, data, manager)
+                continue
+                
+            if data.get("type") == "stop_debate":
+                stop_debate_task(session_id)
+                continue
+                
             if data.get("type") == "chat":
                 user_msg_content = data.get("content", "")
                 if not user_msg_content:
@@ -333,6 +342,11 @@ async def websocket_chat(websocket: WebSocket, session_id: str, db: AsyncSession
                         "content_type": file_data.get("content_type")
                     } if file_data else None
                 })
+                
+                # Jika sesi ini sedang dalam mode debat, hentikan proses biasa di sini.
+                # Pesan interupsi user sudah tersimpan di DB dan akan terbaca oleh agen debat selanjutnya di background.
+                if session_id in active_debates:
+                    continue
                 
                 agent_res = await db.execute(select(Agent).where(Agent.is_active == True).order_by(Agent.order.asc()))
                 active_agents = list(agent_res.scalars().all())
