@@ -1,9 +1,14 @@
 import os
 import json
+import re
+import logging
 from typing import List, Dict, Any
 from providers.anthropic_provider import AnthropicProvider
 from providers.openai_provider import OpenAIProvider
 from providers.gemini_provider import GeminiProvider
+
+# Setup logging
+logger = logging.getLogger(__name__)
 
 MODERATOR_PROVIDER = os.getenv("MODERATOR_PROVIDER", "anthropic")
 MODERATOR_MODEL = os.getenv("MODERATOR_MODEL", "claude-3-5-haiku-20241022")
@@ -71,11 +76,18 @@ async def determine_speaking_order(
             max_tokens=600
         )
         
-        response_text = response_text.replace("```json", "").replace("```", "").strip()
-        data = json.loads(response_text)
-        return dict(data)
+        # Ekstraksi JSON menggunakan Regex untuk menangani teks tambahan di luar blok JSON
+        match = re.search(r'(\{.*\})', response_text, re.DOTALL)
+        if match:
+            json_str = match.group(1)
+            data = json.loads(json_str)
+            return dict(data)
+        else:
+            logger.error(f"Moderator memberikan respons non-JSON: {response_text}")
+            raise ValueError("No JSON block found in response")
+            
     except Exception as e:
-        print(f"Error calling moderator: {e}")
+        logger.error(f"Error calling moderator: {e}")
         return {
              "speaking_order": [str(a["id"]) for a in active_agents],
              "context_hints": {},
