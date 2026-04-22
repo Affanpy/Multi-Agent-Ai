@@ -4,7 +4,7 @@ import asyncio
 import re
 from typing import List, Dict
 from datetime import datetime
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, UploadFile, File as FastAPIFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -14,8 +14,9 @@ from database import init_db, get_db
 from models import Agent, Session, Message
 from schemas import AgentCreate, AgentUpdate, AgentResponse, SessionResponse, SessionDetailResponse
 from security import encrypt_api_key
-from orchestrator import determine_speaking_order
+from orchestrator import determine_speaking_order, generate_summary
 from agent_runner import run_agent_stream
+from file_handler import process_uploaded_file, model_supports_vision, SUPPORTED_IMAGE_TYPES, SUPPORTED_DOC_TYPES
 
 app = FastAPI(title="AgentRoom API")
 
@@ -28,6 +29,9 @@ app.add_middleware(
 )
 
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", 20))
+
+# In-memory cache untuk file yang diupload (per session)
+uploaded_files_cache: Dict[str, dict] = {}
 
 @app.on_event("startup")
 async def startup_event():
@@ -170,6 +174,36 @@ async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)):
     await db.commit()
     return {"message": "Session deleted"}
 
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = FastAPIFile(...)):
+    content_type = file.content_type or ""
+    
+    if content_type not in SUPPORTED_IMAGE_TYPES and content_type not in SUPPORTED_DOC_TYPES:
+        raise HTTPException(status_code=400, detail=f"Tipe file tidak didukung: {content_type}. Gunakan gambar (PNG/JPG/WebP) atau dokumen (PDF/DOCX/TXT).")
+    
+    file_bytes = await file.read()
+    
+    # Max 10MB
+    if len(file_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Ukuran file maksimal 10MB")
+    
+    file_data = process_uploaded_file(file.filename, content_type, file_bytes)
+    
+    # Simpan ke cache dengan unique ID
+    file_id = f"file-{id(file_bytes)}-{file.filename}"
+    uploaded_files_cache[file_id] = file_data
+    
+    return {
+        "file_id": file_id,
+        "filename": file_data["filename"],
+        "content_type": content_type,
+        "is_image": file_data["is_image"],
+        "is_document": file_data["is_document"],
+        "has_extracted_text": bool(file_data["extracted_text"]),
+        "text_preview": (file_data["extracted_text"][:200] + "...") if file_data["extracted_text"] and len(file_data["extracted_text"]) > 200 else file_data.get("extracted_text"),
+        "base64_preview": file_data["base64_data"][:100] + "..." if file_data["base64_data"] else None
+    }
+
 @app.get("/api/providers")
 async def get_providers():
     return {
@@ -180,6 +214,35 @@ async def get_providers():
         ]
     }
 
+@app.post("/api/sessions/{session_id}/summary")
+async def summarize_session(session_id: str, db: AsyncSession = Depends(get_db)):
+    # Ambil semua pesan publik di sesi ini
+    result = await db.execute(
+        select(Message).where(
+            Message.session_id == session_id,
+            Message.is_private == False
+        ).order_by(Message.timestamp.asc())
+    )
+    messages = list(result.scalars().all())
+    
+    if len(messages) < 2:
+        raise HTTPException(status_code=400, detail="Diskusi terlalu pendek untuk dirangkum")
+    
+    # Ambil semua agen untuk resolve nama
+    agent_res = await db.execute(select(Agent))
+    agents_map = {a.id: a.name for a in agent_res.scalars().all()}
+    
+    # Format riwayat chat
+    chat_history = []
+    for m in messages:
+        if m.role == "user":
+            chat_history.append({"role": "user", "content": m.content})
+        elif m.role == "agent":
+            agent_name = agents_map.get(m.agent_id, "Agent")
+            chat_history.append({"role": "agent", "name": agent_name, "content": m.content})
+    
+    summary_text = await generate_summary(chat_history)
+    return {"summary": summary_text}
 
 class ConnectionManager:
     def __init__(self):
@@ -226,7 +289,10 @@ async def websocket_chat(websocket: WebSocket, session_id: str, db: AsyncSession
                 target_agent_id = data.get("target_agent_id")
                 moderator_enabled = data.get("moderator_enabled", True)
                 reply_to_agent_id = data.get("reply_to_agent_id")
+                file_id = data.get("file_id")
                 
+                # Resolve file data dari cache
+                file_data = uploaded_files_cache.pop(file_id, None) if file_id else None
                 user_msg = Message(
                     session_id=session_id, 
                     role="user", 
@@ -258,7 +324,14 @@ async def websocket_chat(websocket: WebSocket, session_id: str, db: AsyncSession
                     "timestamp": user_msg.timestamp.isoformat(),
                     "is_private": is_private,
                     "target_agent_id": target_agent_id,
-                    "reply_to_agent_name": _reply_agent_name
+                    "reply_to_agent_name": _reply_agent_name,
+                    "file_info": {
+                        "filename": file_data["filename"],
+                        "is_image": file_data["is_image"],
+                        "is_document": file_data["is_document"],
+                        "base64_data": file_data.get("base64_data") if file_data.get("is_image") else None,
+                        "content_type": file_data.get("content_type")
+                    } if file_data else None
                 })
                 
                 agent_res = await db.execute(select(Agent).where(Agent.is_active == True).order_by(Agent.order.asc()))
@@ -345,7 +418,7 @@ async def websocket_chat(websocket: WebSocket, session_id: str, db: AsyncSession
                      collected_tokens = []
                      
                      try:
-                         async for token in run_agent_stream(agent_info, raw_history, hint):
+                         async for token in run_agent_stream(agent_info, raw_history, hint, file_data=file_data):
                               collected_tokens.append(token)
                               await manager.broadcast(session_id, {
                                    "type": "agent_stream",

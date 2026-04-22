@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Copy, Check, Reply } from 'lucide-react';
+import { Copy, Check, Reply, FileText, Image as ImageIcon } from 'lucide-react';
 
 function CopyButton({ text }) {
   const [copied, setCopied] = useState(false);
@@ -164,6 +164,38 @@ export default function MessageBubble({ message }) {
     return () => clearInterval(localInterval);
   }, [message.isStreaming]);
   
+  // Render khusus untuk Summary bubble
+  if (message.isSummary) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 15 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className="flex w-full justify-center mb-6"
+      >
+        <div className="w-full max-w-[90%] md:max-w-[85%]">
+          <div className="flex items-center gap-2 mb-2 px-1">
+            <span className="text-lg">📊</span>
+            <span className="text-sm font-semibold text-amber-300">Rangkuman Diskusi</span>
+            <span className="text-[10px] text-slate-500 ml-auto">
+              {message.timestamp ? new Date(message.timestamp).toLocaleTimeString() : ''}
+            </span>
+          </div>
+          <div className="p-5 rounded-xl shadow-lg bg-gradient-to-br from-amber-900/20 to-amber-800/10 backdrop-blur-md border border-amber-500/20">
+            <div className="text-sm leading-relaxed font-sans prose-invert max-w-none">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                {message.content}
+              </ReactMarkdown>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 mt-1 px-1">
+            <CopyButton text={message.content} />
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 15 }}
@@ -194,8 +226,31 @@ export default function MessageBubble({ message }) {
             : 'bg-white/10 backdrop-blur-md border border-white/10 text-slate-100 rounded-tl-none'
         }`}>
           {isUser ? (
-            <div className="whitespace-pre-wrap text-sm leading-relaxed font-sans">
-              {displayedContent}
+            <div className="flex flex-col gap-2">
+              {message.fileInfo && (
+                <div className="flex items-center gap-3 p-2 bg-black/20 rounded-lg border border-white/10 w-fit max-w-full">
+                  <div className="w-12 h-12 rounded flex items-center justify-center overflow-hidden flex-shrink-0 bg-black/40">
+                    {message.fileInfo.is_image && message.fileInfo.base64_data ? (
+                      <img src={`data:${message.fileInfo.content_type};base64,${message.fileInfo.base64_data}`} alt="attachment" className="w-full h-full object-cover rounded" />
+                    ) : message.fileInfo.is_document ? (
+                      <FileText size={24} className="text-emerald-400" />
+                    ) : (
+                      <ImageIcon size={24} className="text-blue-400" />
+                    )}
+                  </div>
+                  <div className="flex flex-col min-w-0 pr-2">
+                    <span className="text-xs font-semibold truncate max-w-[200px] text-white">{message.fileInfo.filename}</span>
+                    <span className="text-[10px] text-indigo-200">
+                      {message.fileInfo.is_image ? 'Gambar disisipkan' : 'Dokumen diekstrak'}
+                    </span>
+                  </div>
+                </div>
+              )}
+              {displayedContent && (
+                <div className="whitespace-pre-wrap text-sm leading-relaxed font-sans">
+                  {displayedContent}
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-sm leading-relaxed font-sans prose-invert max-w-none">

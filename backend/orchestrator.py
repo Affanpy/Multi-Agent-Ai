@@ -81,3 +81,69 @@ async def determine_speaking_order(
              "context_hints": {},
              "reasoning": f"Error running moderator: {str(e)}"
         }
+
+SUMMARY_PROMPT = """Kamu adalah asisten yang ahli merangkum diskusi.
+
+Berikut adalah transkrip lengkap diskusi antara user dan beberapa AI agent:
+
+{chat_transcript}
+
+Buatkan rangkuman komprehensif dari diskusi di atas dalam format Markdown berikut:
+
+## 📊 Rangkuman Diskusi
+
+### 📌 Topik Utama
+(Jelaskan topik utama yang dibahas dalam 1-2 kalimat)
+
+### 💡 Poin-Poin Kunci
+(Daftar poin kunci dari setiap agent, sertakan nama agent)
+
+### ✅ Keputusan / Kesepakatan
+(Hal-hal yang sudah disepakati atau diputuskan, jika ada)
+
+### ⏳ Belum Terselesaikan
+(Hal-hal yang masih diperdebatkan atau perlu ditindaklanjuti, jika ada)
+
+### 🎯 Rekomendasi
+(Saran atau langkah selanjutnya berdasarkan diskusi)
+
+Pastikan rangkuman ringkas tetapi mencakup semua informasi penting. Gunakan bahasa yang sama dengan diskusi (biasanya Indonesia)."""
+
+async def generate_summary(chat_history: list) -> str:
+    transcript_parts = []
+    for m in chat_history:
+        if m["role"] == "user":
+            transcript_parts.append(f"**User**: {m['content']}")
+        else:
+            name = m.get("name", "Agent")
+            transcript_parts.append(f"**{name}**: {m['content']}")
+    
+    transcript = "\n\n".join(transcript_parts)
+    system_prompt = SUMMARY_PROMPT.format(chat_transcript=transcript)
+    
+    if not MODERATOR_API_KEY:
+        return "⚠️ Tidak dapat menghasilkan rangkuman: API key moderator belum dikonfigurasi."
+
+    provider_inst = None
+    if MODERATOR_PROVIDER == "anthropic":
+        provider_inst = AnthropicProvider()
+    elif MODERATOR_PROVIDER == "openai":
+        provider_inst = OpenAIProvider()
+    elif MODERATOR_PROVIDER == "gemini":
+        provider_inst = GeminiProvider()
+    else:
+        return "⚠️ Provider moderator tidak dikenali."
+
+    try:
+        response_text = await provider_inst.generate(
+            api_key=MODERATOR_API_KEY,
+            model=MODERATOR_MODEL,
+            system_prompt=system_prompt,
+            messages=[{"role": "user", "content": "Rangkum diskusi di atas sekarang."}],
+            temperature=0.3,
+            max_tokens=2000
+        )
+        return response_text.strip()
+    except Exception as e:
+        print(f"Error generating summary: {e}")
+        return f"⚠️ Gagal menghasilkan rangkuman: {str(e)}"

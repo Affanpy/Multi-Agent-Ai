@@ -3,34 +3,56 @@ from typing import AsyncGenerator, List, Dict
 from providers.base import BaseProvider
 
 class AnthropicProvider(BaseProvider):
+    def _format_content(self, content) -> any:
+        """Format konten pesan, termasuk multimodal (gambar)."""
+        if isinstance(content, dict) and content.get("type") == "multimodal":
+            return [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": content.get("content_type", "image/png"),
+                        "data": content["image_base64"]
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": content["text"]
+                }
+            ]
+        return content if isinstance(content, str) else str(content)
+
     async def generate_stream(
         self,
         api_key: str,
         model: str,
         system_prompt: str,
-        messages: List[Dict[str, str]],
+        messages: List[Dict],
         temperature: float = 0.7,
         max_tokens: int = 1024
     ) -> AsyncGenerator[str, None]:
         client = AsyncAnthropic(api_key=api_key)
         
-        # Anthropic doesn't allow 'system' role in messages list, it's passed as a separate param
         filtered_messages = [m for m in messages if m["role"] in ["user", "assistant"]]
         
-        # In Anthropic, assistant messages require alternating roles user/assistant. 
-        # Our base messages might have two assistants back to back if two agents replied.
-        # We need to coalesce/format them logically, but Anthropic API requires strict alternating roles.
-        # Let's map any non-user to 'assistant'. Sometimes we might need to merge contiguous roles.
         anthropic_messages = []
         for msg in filtered_messages:
             role = "assistant" if msg["role"] != "user" else "user"
+            content = self._format_content(msg.get("content", ""))
             
-            if len(anthropic_messages) > 0 and anthropic_messages[-1]["role"] == role:
-                anthropic_messages[-1]["content"] += f"\n\n{msg['content']}"
+            # Jika konten multimodal (list), tidak bisa di-merge
+            if isinstance(content, list):
+                if len(anthropic_messages) > 0 and anthropic_messages[-1]["role"] == role:
+                    # Tambahkan sebagai text ke pesan sebelumnya
+                    anthropic_messages[-1]["content"] += f"\n\n{msg.get('content', {}).get('text', '')}" if isinstance(anthropic_messages[-1]["content"], str) else anthropic_messages[-1]["content"]
+                else:
+                    anthropic_messages.append({"role": role, "content": content})
             else:
-                anthropic_messages.append({"role": role, "content": msg['content']})
+                if len(anthropic_messages) > 0 and anthropic_messages[-1]["role"] == role and isinstance(anthropic_messages[-1]["content"], str):
+                    anthropic_messages[-1]["content"] += f"\n\n{content}"
+                else:
+                    anthropic_messages.append({"role": role, "content": content})
 
-        # Ensure first message is user
         if len(anthropic_messages) > 0 and anthropic_messages[0]["role"] == "assistant":
              anthropic_messages.insert(0, {"role": "user", "content": "(Context started with assistant)"})
 
@@ -50,7 +72,7 @@ class AnthropicProvider(BaseProvider):
         api_key: str,
         model: str,
         system_prompt: str,
-        messages: List[Dict[str, str]],
+        messages: List[Dict],
         temperature: float = 0.7,
         max_tokens: int = 1024
     ) -> str:
@@ -61,10 +83,15 @@ class AnthropicProvider(BaseProvider):
         anthropic_messages = []
         for msg in filtered_messages:
             role = "assistant" if msg["role"] != "user" else "user"
-            if len(anthropic_messages) > 0 and anthropic_messages[-1]["role"] == role:
-                anthropic_messages[-1]["content"] += f"\n\n{msg['content']}"
+            content = self._format_content(msg.get("content", ""))
+            
+            if isinstance(content, list):
+                anthropic_messages.append({"role": role, "content": content})
             else:
-                anthropic_messages.append({"role": role, "content": msg['content']})
+                if len(anthropic_messages) > 0 and anthropic_messages[-1]["role"] == role and isinstance(anthropic_messages[-1]["content"], str):
+                    anthropic_messages[-1]["content"] += f"\n\n{content}"
+                else:
+                    anthropic_messages.append({"role": role, "content": content})
 
         if len(anthropic_messages) > 0 and anthropic_messages[0]["role"] == "assistant":
              anthropic_messages.insert(0, {"role": "user", "content": "(Context started with assistant)"})

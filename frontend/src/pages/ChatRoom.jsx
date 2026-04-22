@@ -6,7 +6,7 @@ import MessageBubble from '../components/MessageBubble';
 import TypingIndicator from '../components/TypingIndicator';
 import PrivateDrawer from '../components/PrivateDrawer';
 import { AnimatePresence } from 'framer-motion';
-import { Send, PlusCircle, X, Reply } from 'lucide-react';
+import { Send, PlusCircle, X, Reply, FileText, Loader2, Paperclip, Image as ImageIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export default function ChatRoom() {
@@ -14,7 +14,8 @@ export default function ChatRoom() {
     currentSession, messages, isTyping, typingAgent, 
     createSession, clearSession, activePrivateAgent, 
     setActivePrivateAgent, agents, isModerating,
-    replyTo, setReplyTo
+    replyTo, setReplyTo, generateSummary, isSummarizing,
+    pendingFile, isUploading, uploadFile, clearPendingFile
   } = useStore();
   const [input, setInput] = useState('');
   const messagesEndRef = useRef(null);
@@ -35,12 +36,22 @@ export default function ChatRoom() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [publicMessages, isTyping]);
 
+  const fileInputRef = useRef(null);
+
   const handleSend = (e) => {
     e.preventDefault();
-    if (!input.trim() || status !== 'connected') return;
-    sendMessage(input, false, null, replyTo?.agentId || null);
+    if ((!input.trim() && !pendingFile) || status !== 'connected') return;
+    sendMessage(input, false, null, replyTo?.agentId || null, pendingFile?.file_id || null);
     setInput('');
     setReplyTo(null);
+    clearPendingFile();
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    uploadFile(file);
+    e.target.value = ''; // Reset input
   };
 
   const handleNewSession = async () => {
@@ -83,13 +94,23 @@ export default function ChatRoom() {
               </span>
            </div>
            
-           <button 
-              onClick={handleNewSession} 
-              disabled={messages.length === 0}
-              className="glass-button flex items-center gap-2 px-4 py-2 bg-indigo-500/20 text-indigo-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-           >
-              <PlusCircle size={18} /> New Session
-           </button>
+           <div className="flex items-center gap-2">
+             <button 
+                onClick={generateSummary}
+                disabled={publicMessages.length < 2 || isSummarizing || isTyping}
+                className="glass-button flex items-center gap-2 px-4 py-2 bg-amber-500/20 text-amber-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-amber-500/30 transition-colors"
+             >
+               {isSummarizing ? <Loader2 size={18} className="animate-spin" /> : <FileText size={18} />}
+               {isSummarizing ? 'Merangkum...' : 'Rangkum'}
+             </button>
+             <button 
+                onClick={handleNewSession} 
+                disabled={messages.length === 0}
+                className="glass-button flex items-center gap-2 px-4 py-2 bg-indigo-500/20 text-indigo-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+             >
+                <PlusCircle size={18} /> New Session
+             </button>
+           </div>
         </div>
 
         {/* Chat Area */}
@@ -141,7 +162,50 @@ export default function ChatRoom() {
             </div>
           )}
 
+          {/* Pending File Preview Bar */}
+          {pendingFile && (
+            <div className="flex items-center gap-3 mb-3 max-w-4xl mx-auto bg-slate-800/80 border border-slate-600/50 rounded-lg p-2">
+              <div className="w-10 h-10 rounded bg-black/30 flex items-center justify-center overflow-hidden flex-shrink-0 border border-white/5">
+                {pendingFile.is_image && pendingFile.localPreview ? (
+                  <img src={pendingFile.localPreview} alt="preview" className="w-full h-full object-cover" />
+                ) : pendingFile.is_document ? (
+                  <FileText size={20} className="text-emerald-400" />
+                ) : (
+                  <ImageIcon size={20} className="text-blue-400" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-slate-200 truncate">{pendingFile.filename}</p>
+                <p className="text-[10px] text-slate-400 truncate">
+                  {pendingFile.is_image ? 'Gambar disisipkan' : pendingFile.has_extracted_text ? 'Teks dokumen diekstrak' : 'File disisipkan'}
+                </p>
+              </div>
+              <button 
+                onClick={clearPendingFile} 
+                className="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors flex-shrink-0"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
+
           <form onSubmit={handleSend} className="flex gap-3 relative max-w-4xl mx-auto">
+             <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileChange} 
+                className="hidden" 
+                accept="image/png, image/jpeg, image/webp, image/gif, application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document, text/plain"
+             />
+             <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={activeAgentsCount === 0 || status !== 'connected' || isUploading}
+                className={`glass-button bg-white/5 hover:bg-white/10 text-slate-300 p-4 rounded-xl flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed ${isUploading ? 'animate-pulse text-indigo-400' : ''}`}
+             >
+                {isUploading ? <Loader2 size={20} className="animate-spin" /> : <Paperclip size={20} />}
+             </button>
+             
              <input 
                type="text" 
                value={input}
@@ -156,7 +220,7 @@ export default function ChatRoom() {
              />
               <button 
                type="submit" 
-               disabled={status !== 'connected' || !input.trim() || isTyping || isModerating || activeAgentsCount === 0}
+               disabled={status !== 'connected' || (!input.trim() && !pendingFile) || isTyping || isModerating || activeAgentsCount === 0 || isUploading}
                className="glass-button bg-indigo-600 hover:bg-indigo-500 text-white p-4 rounded-xl flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
              >
                <Send size={20} />

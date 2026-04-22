@@ -15,11 +15,67 @@ export const useStore = create((set, get) => ({
   isModerating: false,
   moderatorEnabled: true,
   replyTo: null,
+  isSummarizing: false,
   
   setModerating: (status) => set({ isModerating: status }),
   setActivePrivateAgent: (agentId) => set({ activePrivateAgent: agentId }),
   toggleModerator: () => set(state => ({ moderatorEnabled: !state.moderatorEnabled })),
   setReplyTo: (message) => set({ replyTo: message }),
+
+  generateSummary: async () => {
+    const session = get().currentSession;
+    if (!session) return;
+    set({ isSummarizing: true });
+    try {
+      const res = await fetch(`${API_URL}/sessions/${session.id}/summary`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        set(state => ({
+          messages: [...state.messages, {
+            id: `summary-${Date.now()}`,
+            role: 'system',
+            content: data.summary,
+            timestamp: new Date().toISOString(),
+            isSummary: true
+          }]
+        }));
+      } else {
+        const err = await res.json();
+        alert(err.detail || 'Gagal menghasilkan rangkuman');
+      }
+    } catch(e) {
+      console.error('Summary error:', e);
+      alert('Gagal menghasilkan rangkuman');
+    }
+    set({ isSummarizing: false });
+  },
+
+  pendingFile: null,
+  isUploading: false,
+
+  uploadFile: async (file) => {
+    set({ isUploading: true });
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
+      if (res.ok) {
+        const data = await res.json();
+        // Simpan preview lokal
+        const localPreview = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
+        set({ pendingFile: { ...data, localPreview } });
+      } else {
+        const err = await res.json();
+        alert(err.detail || 'Gagal upload file');
+      }
+    } catch(e) {
+      console.error('Upload error:', e);
+      alert('Gagal upload file');
+    }
+    set({ isUploading: false });
+  },
+
+  clearPendingFile: () => set({ pendingFile: null }),
   
   fetchAgents: async () => {
     try {

@@ -1,20 +1,37 @@
 import os
+import base64
 from typing import AsyncGenerator, List, Dict
 from google import genai
 from google.genai import types
 from providers.base import BaseProvider
 
 class GeminiProvider(BaseProvider):
-    def _format_messages(self, messages: List[Dict[str, str]]) -> List[types.Content]:
+    def _format_messages(self, messages: List[Dict]) -> List[types.Content]:
         formatted = []
         for msg in messages:
-            # Gemini roles are strictly "user" or "model"
             role = "model" if msg["role"] != "user" else "user"
+            content = msg.get("content", "")
             
-            if len(formatted) > 0 and formatted[-1].role == role:
-                formatted[-1].parts[0].text += f"\n\n{msg['content']}"
+            # Handle multimodal content (gambar)
+            if isinstance(content, dict) and content.get("type") == "multimodal":
+                parts = [types.Part.from_text(text=content["text"])]
+                # Tambahkan gambar sebagai inline data
+                image_bytes = base64.b64decode(content["image_base64"])
+                parts.append(types.Part.from_bytes(
+                    data=image_bytes,
+                    mime_type=content.get("content_type", "image/png")
+                ))
+                
+                if len(formatted) > 0 and formatted[-1].role == role:
+                    formatted[-1].parts.extend(parts)
+                else:
+                    formatted.append(types.Content(role=role, parts=parts))
             else:
-                formatted.append(types.Content(role=role, parts=[types.Part.from_text(text=msg["content"])]))
+                text = content if isinstance(content, str) else str(content)
+                if len(formatted) > 0 and formatted[-1].role == role:
+                    formatted[-1].parts[0].text += f"\n\n{text}"
+                else:
+                    formatted.append(types.Content(role=role, parts=[types.Part.from_text(text=text)]))
                 
         if len(formatted) > 0 and formatted[0].role == "model":
              formatted.insert(0, types.Content(role="user", parts=[types.Part.from_text(text="(Context started with model)")]))
@@ -26,7 +43,7 @@ class GeminiProvider(BaseProvider):
         api_key: str,
         model: str,
         system_prompt: str,
-        messages: List[Dict[str, str]],
+        messages: List[Dict],
         temperature: float = 0.7,
         max_tokens: int = 1024
     ) -> AsyncGenerator[str, None]:
@@ -40,8 +57,6 @@ class GeminiProvider(BaseProvider):
         
         formatted_messages = self._format_messages(messages)
         
-        # NOTE: google-genai is mostly sync but provides async client if instantiated differently.
-        # But we can use the regular generate_content_stream
         response = client.models.generate_content_stream(
             model=model,
             contents=formatted_messages,
@@ -57,7 +72,7 @@ class GeminiProvider(BaseProvider):
         api_key: str,
         model: str,
         system_prompt: str,
-        messages: List[Dict[str, str]],
+        messages: List[Dict],
         temperature: float = 0.7,
         max_tokens: int = 1024
     ) -> str:
