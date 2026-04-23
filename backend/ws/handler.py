@@ -1,7 +1,4 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from database import get_db
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from connection_manager import manager
 from debate_manager import start_debate_task, stop_debate_task
 from services.chat_service import process_chat_message
@@ -10,7 +7,7 @@ router = APIRouter()
 
 
 @router.websocket("/ws/{session_id}")
-async def websocket_chat(websocket: WebSocket, session_id: str, db: AsyncSession = Depends(get_db)):
+async def websocket_chat(websocket: WebSocket, session_id: str):
     await manager.connect(websocket, session_id)
     
     try:
@@ -30,7 +27,7 @@ async def websocket_chat(websocket: WebSocket, session_id: str, db: AsyncSession
                 continue
                 
             if data.get("type") == "chat":
-                await process_chat_message(session_id, data, db, manager)
+                await process_chat_message(session_id, data, manager)
                 
     except WebSocketDisconnect:
         manager.disconnect(websocket, session_id)

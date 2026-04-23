@@ -1,4 +1,5 @@
 import asyncio
+import re
 from typing import Dict, List, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -131,7 +132,10 @@ async def run_debate_loop(
 
                 full_message = "".join(collected_tokens)
                 
-                # Simpan jawaban ke DB
+                # Post-processing: hapus prefix halusinasi (sama seperti chat_service)
+                full_message = _post_process_debate_message(full_message, agents_dict)
+                
+                # Simpan jawaban ke DB dan ambil timestamp di dalam session context
                 async with AsyncSessionLocal() as db:
                     new_msg = Message(
                         session_id=session_id,
@@ -142,15 +146,17 @@ async def run_debate_loop(
                     )
                     db.add(new_msg)
                     await db.commit()
+                    # Ambil timestamp di sini, selagi masih dalam session context
+                    msg_timestamp = new_msg.timestamp.isoformat()
 
-                # Broadcast finalization
+                # Broadcast finalization (pakai timestamp yang sudah di-capture)
                 await manager.broadcast(session_id, {
                     "type": "agent_done",
                     "agent_id": str(agent_db.id),
                     "agent_name": agent_info["name"],
                     "agent_emoji": agent_info["avatar_emoji"],
                     "full_message": full_message,
-                    "timestamp": new_msg.timestamp.isoformat(),
+                    "timestamp": msg_timestamp,
                     "is_private": False,
                     "target_agent_id": None
                 })
@@ -194,3 +200,14 @@ def stop_debate_task(session_id: str):
     if session_id in active_debates:
         active_debates[session_id].cancel()
         del active_debates[session_id]
+
+
+def _post_process_debate_message(full_message: str, agents_dict: dict) -> str:
+    """Bersihkan prefix halusinasi dari respons agen debat."""
+    all_names = [info["name"] for info in agents_dict.values()]
+    for name in all_names:
+        pattern = rf'(?m)^\s*\[?{re.escape(name)}\]?\s*[::]\s*|^\s*\*{{1,2}}{re.escape(name)}\*{{1,2}}\s*[::]\s*'
+        full_message = re.sub(pattern, '', full_message, flags=re.IGNORECASE).strip()
+    
+    full_message = re.sub(r'^(?:---\s*|\n)+', '', full_message).strip()
+    return full_message

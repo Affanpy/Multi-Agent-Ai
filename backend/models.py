@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, String, Integer, Float, Boolean, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from database import Base
@@ -29,7 +29,7 @@ class Session(Base):
     
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
     title = Column(String, default="New Session")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     messages = relationship("Message", back_populates="session", cascade="all, delete-orphan")
 
@@ -41,7 +41,7 @@ class Message(Base):
     role = Column(String, nullable=False) # "user", "agent", "system"
     agent_id = Column(String, ForeignKey("agents.id"), nullable=True) # None if user or system
     content = Column(String, nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_private = Column(Boolean, default=False)
     target_agent_id = Column(String, ForeignKey("agents.id"), nullable=True)
     

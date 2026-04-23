@@ -22,8 +22,8 @@ async def upload_file(file: UploadFile = FastAPIFile(...)):
     file_data = process_uploaded_file(file.filename, content_type, file_bytes)
     
     # Simpan ke cache dengan unique ID
-    file_id = f"file-{id(file_bytes)}-{file.filename}"
-    uploaded_files_cache[file_id] = file_data
+    file_id = uploaded_files_cache.generate_file_id(file.filename)
+    uploaded_files_cache.put(file_id, file_data)
     
     return {
         "file_id": file_id,

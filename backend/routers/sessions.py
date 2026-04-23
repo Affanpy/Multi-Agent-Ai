@@ -1,5 +1,5 @@
 from typing import List
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -21,7 +21,7 @@ async def list_sessions(db: AsyncSession = Depends(get_db)):
 
 @router.post("", response_model=SessionResponse)
 async def create_session(db: AsyncSession = Depends(get_db)):
-    db_session = Session(title="New Session", created_at=datetime.utcnow())
+    db_session = Session(title="New Session", created_at=datetime.now(timezone.utc))
     db.add(db_session)
     await db.commit()
     await db.refresh(db_session)

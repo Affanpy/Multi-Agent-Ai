@@ -3,9 +3,7 @@ import json
 import re
 import logging
 from typing import List, Dict, Any
-from providers.anthropic_provider import AnthropicProvider
-from providers.openai_provider import OpenAIProvider
-from providers.gemini_provider import GeminiProvider
+from providers import get_provider
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -56,15 +54,10 @@ async def determine_speaking_order(
              "reasoning": "Fallback order because Moderator API key is missing."
         }
 
-    provider_inst = None
-    if MODERATOR_PROVIDER == "anthropic":
-        provider_inst = AnthropicProvider()
-    elif MODERATOR_PROVIDER == "openai":
-        provider_inst = OpenAIProvider()
-    elif MODERATOR_PROVIDER == "gemini":
-        provider_inst = GeminiProvider()
-    else:
-         return {"speaking_order": [str(a["id"]) for a in active_agents], "context_hints": {}}
+    try:
+        provider_inst = get_provider(MODERATOR_PROVIDER)
+    except ValueError:
+        return {"speaking_order": [str(a["id"]) for a in active_agents], "context_hints": {}}
 
     try:
         response_text = await provider_inst.generate(
@@ -76,10 +69,10 @@ async def determine_speaking_order(
             max_tokens=600
         )
         
-        # Ekstraksi JSON menggunakan Regex untuk menangani teks tambahan di luar blok JSON
-        match = re.search(r'(\{.*\})', response_text, re.DOTALL)
+        # Ekstraksi JSON — gunakan non-greedy match untuk menghindari tangkapan berlebih
+        match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response_text)
         if match:
-            json_str = match.group(1)
+            json_str = match.group(0)
             data = json.loads(json_str)
             return dict(data)
         else:
@@ -136,14 +129,9 @@ async def generate_summary(chat_history: list) -> str:
     if not MODERATOR_API_KEY:
         return "⚠️ Tidak dapat menghasilkan rangkuman: API key moderator belum dikonfigurasi."
 
-    provider_inst = None
-    if MODERATOR_PROVIDER == "anthropic":
-        provider_inst = AnthropicProvider()
-    elif MODERATOR_PROVIDER == "openai":
-        provider_inst = OpenAIProvider()
-    elif MODERATOR_PROVIDER == "gemini":
-        provider_inst = GeminiProvider()
-    else:
+    try:
+        provider_inst = get_provider(MODERATOR_PROVIDER)
+    except ValueError:
         return "⚠️ Provider moderator tidak dikenali."
 
     try:

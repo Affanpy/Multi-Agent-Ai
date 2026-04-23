@@ -1,82 +1,146 @@
 import asyncio
 import re
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from database import AsyncSessionLocal
 from models import Agent, Session, Message
 from config import MAX_HISTORY_MESSAGES, uploaded_files_cache
 from orchestrator import determine_speaking_order
 from agent_runner import run_agent_stream
 from debate_manager import active_debates
 
+logger = logging.getLogger(__name__)
 
-async def process_chat_message(session_id, data, db, manager):
-    """Orchestrator utama. Dipanggil dari WS handler saat type='chat'."""
-    user_msg_content = data.get("content", "")
-    if not user_msg_content:
+MAX_CONTENT_LENGTH = 10000  # Batas panjang pesan user
+
+
+def _validate_chat_data(data: dict) -> dict | str:
+    """Validasi dan sanitasi payload chat dari WebSocket.
+    Returns dict yang sudah bersih, atau string error message jika invalid."""
+    
+    # Content: harus string non-kosong
+    content = data.get("content")
+    if not isinstance(content, str) or not content.strip():
+        return "Content harus berupa teks yang tidak kosong."
+    content = content.strip()
+    if len(content) > MAX_CONTENT_LENGTH:
+        return f"Pesan terlalu panjang (maks {MAX_CONTENT_LENGTH} karakter)."
+    
+    # is_private: harus boolean
+    is_private = data.get("is_private", False)
+    if not isinstance(is_private, bool):
+        is_private = False
+    
+    # target_agent_id: opsional, harus string atau None
+    target_agent_id = data.get("target_agent_id")
+    if target_agent_id is not None and not isinstance(target_agent_id, str):
+        target_agent_id = str(target_agent_id)
+    
+    # Private chat harus punya target
+    if is_private and not target_agent_id:
+        return "Private chat membutuhkan target_agent_id."
+    
+    # reply_to_agent_id: opsional, harus string atau None
+    reply_to_agent_id = data.get("reply_to_agent_id")
+    if reply_to_agent_id is not None and not isinstance(reply_to_agent_id, str):
+        reply_to_agent_id = str(reply_to_agent_id)
+    
+    # moderator_enabled: harus boolean
+    moderator_enabled = data.get("moderator_enabled", True)
+    if not isinstance(moderator_enabled, bool):
+        moderator_enabled = True
+    
+    # file_id: opsional, harus string atau None
+    file_id = data.get("file_id")
+    if file_id is not None and not isinstance(file_id, str):
+        file_id = None
+    
+    return {
+        "content": content,
+        "is_private": is_private,
+        "target_agent_id": target_agent_id,
+        "reply_to_agent_id": reply_to_agent_id,
+        "moderator_enabled": moderator_enabled,
+        "file_id": file_id,
+    }
+
+
+async def process_chat_message(session_id, data, manager):
+    """Orchestrator utama. Dipanggil dari WS handler saat type='chat'.
+    Membuat fresh DB session per pesan untuk menghindari stale data."""
+    
+    # Validasi input
+    validated = _validate_chat_data(data)
+    if isinstance(validated, str):
+        logger.warning(f"Invalid chat data dari session {session_id}: {validated}")
+        await manager.broadcast(session_id, {"type": "error", "content": validated})
         return
     
-    is_private = data.get("is_private", False)
-    target_agent_id = data.get("target_agent_id")
-    moderator_enabled = data.get("moderator_enabled", True)
-    reply_to_agent_id = data.get("reply_to_agent_id")
-    file_id = data.get("file_id")
+    user_msg_content = validated["content"]
+    is_private = validated["is_private"]
+    target_agent_id = validated["target_agent_id"]
+    moderator_enabled = validated["moderator_enabled"]
+    reply_to_agent_id = validated["reply_to_agent_id"]
+    file_id = validated["file_id"]
     
     # Resolve file data dari cache
-    file_data = uploaded_files_cache.pop(file_id, None) if file_id else None
+    file_data = uploaded_files_cache.pop(file_id) if file_id else None
     
-    # Simpan pesan user
-    user_msg = await _save_user_message(session_id, user_msg_content, is_private, target_agent_id, db)
-    
-    # Resolve reply agent name untuk broadcast
-    reply_agent_name = await _resolve_reply_agent_name(reply_to_agent_id, db)
-    
-    # Broadcast pesan user
-    await _broadcast_user_message(
-        session_id, user_msg_content, user_msg, file_data,
-        reply_agent_name, is_private, target_agent_id, manager
-    )
-    
-    # Jika sesi ini sedang dalam mode debat, hentikan proses biasa di sini.
-    # Pesan interupsi user sudah tersimpan di DB dan akan terbaca oleh agen debat selanjutnya di background.
-    if session_id in active_debates:
-        return
-    
-    # Ambil active agents
-    agent_res = await db.execute(select(Agent).where(Agent.is_active == True).order_by(Agent.order.asc()))
-    active_agents = list(agent_res.scalars().all())
-    if not active_agents:
-        await manager.broadcast(session_id, {"type": "error", "content": "No active agents available"})
-        return
+    async with AsyncSessionLocal() as db:
+        # Simpan pesan user
+        user_msg = await _save_user_message(session_id, user_msg_content, is_private, target_agent_id, db)
         
-    agents_dict = {
-         a.id: {
-             "id": a.id, "name": a.name, "role": a.role, "soul": a.soul,
-             "system_prompt": a.system_prompt, "provider": a.provider,
-             "model": a.model, "api_key_encrypted": a.api_key_encrypted,
-             "temperature": a.temperature, "max_tokens": a.max_tokens,
-             "avatar_emoji": a.avatar_emoji
-         } for a in active_agents
-    }
-    
-    # Build chat history
-    raw_history = await _build_chat_history(session_id, is_private, target_agent_id, agents_dict, db)
-    
-    # Resolve speaking order
-    speaking_order, context_hints = await _resolve_speaking_order(
-        session_id, is_private, target_agent_id, reply_to_agent_id,
-        moderator_enabled, user_msg_content, active_agents, agents_dict,
-        raw_history, manager
-    )
-    
-    # Execute agent round
-    await _execute_agent_round(
-        session_id, speaking_order, agents_dict, raw_history,
-        context_hints, is_private, target_agent_id, active_agents,
-        file_data, db, manager
-    )
-    
-    await manager.broadcast(session_id, {"type": "round_complete"})
+        # Resolve reply agent name untuk broadcast
+        reply_agent_name = await _resolve_reply_agent_name(reply_to_agent_id, db)
+        
+        # Broadcast pesan user
+        await _broadcast_user_message(
+            session_id, user_msg_content, user_msg, file_data,
+            reply_agent_name, is_private, target_agent_id, manager
+        )
+        
+        # Jika sesi ini sedang dalam mode debat, hentikan proses biasa di sini.
+        # Pesan interupsi user sudah tersimpan di DB dan akan terbaca oleh agen debat selanjutnya di background.
+        if session_id in active_debates:
+            return
+        
+        # Ambil active agents
+        agent_res = await db.execute(select(Agent).where(Agent.is_active == True).order_by(Agent.order.asc()))
+        active_agents = list(agent_res.scalars().all())
+        if not active_agents:
+            await manager.broadcast(session_id, {"type": "error", "content": "No active agents available"})
+            return
+            
+        agents_dict = {
+             a.id: {
+                 "id": a.id, "name": a.name, "role": a.role, "soul": a.soul,
+                 "system_prompt": a.system_prompt, "provider": a.provider,
+                 "model": a.model, "api_key_encrypted": a.api_key_encrypted,
+                 "temperature": a.temperature, "max_tokens": a.max_tokens,
+                 "avatar_emoji": a.avatar_emoji
+             } for a in active_agents
+        }
+        
+        # Build chat history
+        raw_history = await _build_chat_history(session_id, is_private, target_agent_id, agents_dict, db)
+        
+        # Resolve speaking order
+        speaking_order, context_hints = await _resolve_speaking_order(
+            session_id, is_private, target_agent_id, reply_to_agent_id,
+            moderator_enabled, user_msg_content, active_agents, agents_dict,
+            raw_history, manager
+        )
+        
+        # Execute agent round
+        await _execute_agent_round(
+            session_id, speaking_order, agents_dict, raw_history,
+            context_hints, is_private, target_agent_id, active_agents,
+            file_data, db, manager
+        )
+        
+        await manager.broadcast(session_id, {"type": "round_complete"})
 
 
 async def _save_user_message(session_id, content, is_private, target_agent_id, db):

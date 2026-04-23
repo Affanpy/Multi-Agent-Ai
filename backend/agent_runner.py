@@ -61,6 +61,9 @@ async def run_agent_stream(
     enc_key = agent_data.get("api_key_encrypted")
     api_key = decrypt_api_key(enc_key)
     
+    if api_key is None:
+        yield f"[System: ⛔ API key untuk {agent_data.get('name')} tidak dapat didekripsi. Kemungkinan SECRET_KEY berubah. Silakan update API key agen ini di Agent Manager.]"
+        return
     if not api_key:
         yield f"[System: No API configured for {agent_data.get('name')}]"
         return

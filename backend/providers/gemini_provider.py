@@ -57,13 +57,13 @@ class GeminiProvider(BaseProvider):
         
         formatted_messages = self._format_messages(messages)
         
-        response = client.models.generate_content_stream(
+        response = await client.aio.models.generate_content_stream(
             model=model,
             contents=formatted_messages,
             config=config
         )
         
-        for chunk in response:
+        async for chunk in response:
             if chunk.text:
                 yield chunk.text
 
@@ -86,7 +86,7 @@ class GeminiProvider(BaseProvider):
         
         formatted_messages = self._format_messages(messages)
         
-        response = client.models.generate_content(
+        response = await client.aio.models.generate_content(
             model=model,
             contents=formatted_messages,
             config=config
